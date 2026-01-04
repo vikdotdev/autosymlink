@@ -1,10 +1,11 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const config = @import("config.zig");
 const commands = @import("commands.zig");
 
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-const version = "0.1.0";
+const version = build_options.version;
 
 fn getDefaultConfigPath(arena: *ArenaAllocator) ![]const u8 {
     const allocator = arena.allocator();

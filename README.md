@@ -9,7 +9,7 @@ If you're managing dotfiles or need to maintain symlinks across machines, this t
 ```bash
 mkdir -p ~/.local/bin ~/.config/autosymlink
 curl -sL $(curl -s https://api.github.com/repos/vikdotdev/autosymlink/releases/latest | grep -o 'https://.*x86_64-linux-musl') -o ~/.local/bin/autosymlink && chmod +x ~/.local/bin/autosymlink
-echo '{"links": []}' > ~/.config/autosymlink/config.json
+echo '{"links": []}' > ~/.config/autosymlink/links.json
 ```
 
 ### Manual download
@@ -24,24 +24,56 @@ autosymlink doctor            # Check health of symlinks
 autosymlink --help            # Show help
 ```
 
-### Config file
+### Links file
 
-Default location: `~/.config/autosymlink/config.json`
+Default location: `~/.config/autosymlink/links.json`
 
 ```json
 {
   "links": [
-    {"source": "~/.dotfiles/bashrc", "destination": "~/.bashrc"},
-    {"source": "~/.dotfiles/vimrc", "destination": "~/.vimrc", "force": true}
+    {"source": "${dotfiles}/bashrc", "destination": "~/.bashrc"},
+    {"source": "${dotfiles}/nvim", "destination": "~/.config/nvim"},
+    {"source": "${notes}", "destination": "${project}/notes.md"}
   ]
 }
 ```
 
-Use `--config` or `-c` to specify a different config path.
+Use `--links` or `-l` to specify a different path.
 
-### Options
+### Aliases file
 
-- `source` - Path to the source file (supports `~` expansion)
+Default location: `~/.config/autosymlink/aliases.json`
+
+Aliases let you define variables that get interpolated in your links. This is useful for:
+- Keeping sensitive paths out of public view
+- Machine-specific configurations using `${_hostname}`
+
+```json
+{
+  "dotfiles": "${_home}/.dotfiles",
+  "notes": "${_home}/Documents/secret-client-project-notes.md"
+  "project": "${_home}/Work/secret-client-project"
+}
+```
+
+Use `--aliases` or `-a` to specify a different path.
+
+### Variables
+
+**Built-in:**
+- `${_home}` - Home directory
+- `${_user}` - Current user
+- `${_hostname}` - Machine hostname
+
+**Environment variables** work directly: `${HOME}`, `${USER}`, `${XDG_CONFIG_HOME}`, etc.
+
+Resolution order: aliases → environment variables → error.
+
+Variables can reference other variables and will be resolved recursively. Only `${VAR}` syntax is supported (`$VAR` without braces is treated as literal text).
+
+### Link options
+
+- `source` - Path to the source file (supports `~` and `${var}` expansion)
 - `destination` - Path where symlink will be created
 - `force` - Overwrite existing files (default: false)
 

@@ -1,21 +1,13 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const config = @import("config.zig");
+const config_mod = @import("config.zig");
 const commands = @import("commands.zig");
+
+const Config = config_mod.Config;
 
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const version = build_options.version;
-
-fn getDefaultConfigPath(arena: *ArenaAllocator) ![]const u8 {
-    const allocator = arena.allocator();
-    const xdg_config_home = std.posix.getenv("XDG_CONFIG_HOME");
-    if (xdg_config_home) |base| {
-        return std.fmt.allocPrint(allocator, "{s}/autosymlink/config.json", .{base});
-    }
-    const home = std.posix.getenv("HOME") orelse return error.HomeNotSet;
-    return std.fmt.allocPrint(allocator, "{s}/.config/autosymlink/config.json", .{home});
-}
 
 const Command = enum {
     link,
@@ -27,7 +19,7 @@ const Command = enum {
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    var arena = ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
     const allocator = arena.allocator();
 
@@ -47,16 +39,23 @@ pub fn main() !void {
     _ = args.next(); // skip program name
 
     var command: ?Command = null;
-    var config_path: ?[]const u8 = null;
+    var links_path: ?[]const u8 = null;
+    var aliases_path: ?[]const u8 = null;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             command = .help;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
             command = .version;
-        } else if (std.mem.eql(u8, arg, "--config") or std.mem.eql(u8, arg, "-c")) {
-            config_path = args.next() orelse {
-                try stderr.print("error: --config requires a path argument\n", .{});
+        } else if (std.mem.eql(u8, arg, "--links") or std.mem.eql(u8, arg, "-l")) {
+            links_path = args.next() orelse {
+                try stderr.print("error: --links requires a path argument\n", .{});
+                stderr.flush() catch {};
+                std.process.exit(1);
+            };
+        } else if (std.mem.eql(u8, arg, "--aliases") or std.mem.eql(u8, arg, "-a")) {
+            aliases_path = args.next() orelse {
+                try stderr.print("error: --aliases requires a path argument\n", .{});
                 stderr.flush() catch {};
                 std.process.exit(1);
             };
@@ -93,34 +92,22 @@ pub fn main() !void {
         return;
     }
 
-    // Resolve config path
-    const resolved_config_path = config_path orelse getDefaultConfigPath(&arena) catch |err| {
-        if (err == error.HomeNotSet) {
-            try stderr.print("error: HOME environment variable not set\n", .{});
-        } else {
-            try stderr.print("error: could not determine config path: {any}\n", .{err});
-        }
-        stderr.flush() catch {};
-        std.process.exit(1);
-    };
-
     // Load config
-    const cfg = config.loadConfig(&arena, resolved_config_path) catch |err| {
+    const config = Config.init(&arena, links_path, aliases_path) catch |err| {
         switch (err) {
-            error.FileNotFound => try stderr.print("error: config file not found: {s}\n", .{resolved_config_path}),
-            error.ParseError => try stderr.print("error: failed to parse config file: {s}\n", .{resolved_config_path}),
+            error.FileNotFound => try stderr.print("error: links file not found\n", .{}),
+            error.ParseError => try stderr.print("error: failed to parse config file\n", .{}),
             error.HomeNotSet => try stderr.print("error: HOME environment variable not set\n", .{}),
             else => try stderr.print("error: could not load config: {any}\n", .{err}),
         }
         stderr.flush() catch {};
         std.process.exit(1);
     };
-    defer cfg.deinit();
 
     // Execute command
     const result = switch (command.?) {
-        .link => commands.runLink(&arena, cfg.value, stdout),
-        .doctor => commands.runDoctor(&arena, cfg.value, stdout),
+        .link => commands.runLink(stdout, config),
+        .doctor => commands.runDoctor(&arena, stdout, config),
         .help, .version => unreachable,
     };
 
@@ -145,23 +132,37 @@ fn printUsage(writer: anytype) !void {
         \\    doctor      Check health of all symlinks
         \\
         \\OPTIONS:
-        \\    -c, --config <path>    Config file path (default: ~/.config/autosymlink/config.json)
-        \\    -h, --help             Show this help
-        \\    -v, --version          Show version
+        \\    -l, --links <path>      Links file path (default: ~/.config/autosymlink/links.json)
+        \\    -a, --aliases <path>    Aliases file path (default: ~/.config/autosymlink/aliases.json)
+        \\    -h, --help              Show this help
+        \\    -v, --version           Show version
         \\
-        \\CONFIG FORMAT:
+        \\LINKS FORMAT (links.json):
         \\    {{
         \\      "links": [
-        \\        {{"source": "~/.dotfiles/bashrc", "destination": "~/.bashrc"}},
-        \\        {{"source": "~/.dotfiles/vimrc", "destination": "~/.vimrc", "force": true}}
+        \\        {{"source": "${{dotfiles}}/bashrc", "destination": "~/.bashrc"}},
+        \\        {{"source": "${{dotfiles}}/vimrc", "destination": "~/.vimrc", "force": true}}
         \\      ]
         \\    }}
+        \\
+        \\ALIASES FORMAT (aliases.json):
+        \\    {{
+        \\      "dotfiles": "${{_home}}/.dotfiles",
+        \\      "nvim": "${{dotfiles}}/nvim"
+        \\    }}
+        \\
+        \\BUILT-IN VARIABLES:
+        \\    ${{_home}}       Home directory
+        \\    ${{_user}}       Current user
+        \\    ${{_hostname}}   Machine hostname
         \\
     , .{});
 }
 
 test {
-    _ = config;
+    _ = config_mod;
     _ = commands;
     _ = @import("symlink.zig");
+    _ = @import("aliases.zig");
+    _ = @import("links.zig");
 }

@@ -1,9 +1,10 @@
 const std = @import("std");
-const config = @import("config.zig");
+const config_mod = @import("config.zig");
 const symlink = @import("symlink.zig");
 
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Writer = std.Io.Writer;
+const Config = config_mod.Config;
 
 const Status = enum {
     ok,
@@ -49,13 +50,13 @@ pub const CommandError = error{
 };
 
 /// Run the link command - create all symlinks from config
-pub fn runLink(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !void {
+pub fn runLink(writer: *Writer, config: Config) !void {
     var created_count: u32 = 0;
     var skipped_count: u32 = 0;
     var failed_count: u32 = 0;
 
-    for (cfg.links) |link| {
-        const result = symlink.createLink(arena, link) catch {
+    for (config.links) |link| {
+        const result = symlink.createLink(link) catch {
             try Status.fail.print(writer, "{s} -> {s} (error)", .{ link.source, link.destination });
             failed_count += 1;
             continue;
@@ -86,14 +87,14 @@ pub fn runLink(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !voi
 }
 
 /// Run the doctor command - check health of all links
-pub fn runDoctor(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !void {
+pub fn runDoctor(arena: *ArenaAllocator, writer: *Writer, config: Config) !void {
     var ok_count: u32 = 0;
     var broken_count: u32 = 0;
     var missing_count: u32 = 0;
     var wrong_count: u32 = 0;
     var conflict_count: u32 = 0;
 
-    for (cfg.links) |link| {
+    for (config.links) |link| {
         const status = symlink.checkLink(arena, link) catch {
             try Status.err.print(writer, "{s} -> {s} (could not check)", .{ link.destination, link.source });
             continue;
@@ -125,5 +126,5 @@ pub fn runDoctor(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !v
     }
 
     try writer.print("\n{d} ok, {d} broken, {d} missing, {d} wrong, {d} conflict\n", .{ ok_count, broken_count, missing_count, wrong_count, conflict_count });
-    if (ok_count != cfg.links.len) return CommandError.LinksUnhealthy;
+    if (ok_count != config.links.len) return CommandError.LinksUnhealthy;
 }

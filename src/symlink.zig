@@ -1,7 +1,8 @@
 const std = @import("std");
-const config = @import("config.zig");
+const links_mod = @import("links.zig");
 
 const ArenaAllocator = std.heap.ArenaAllocator;
+const Link = links_mod.Link;
 
 pub const LinkStatus = enum {
     ok,
@@ -19,11 +20,9 @@ pub const CreateResult = enum {
 };
 
 /// Check the status of a symlink using fstatat with SYMLINK_NOFOLLOW
-pub fn checkLink(arena: *ArenaAllocator, link: config.Link) !LinkStatus {
+pub fn checkLink(arena: *ArenaAllocator, link: Link) !LinkStatus {
     const allocator = arena.allocator();
-    const source = try config.expandPath(arena, link.source);
-    const destination = try config.expandPath(arena, link.destination);
-    const dest_z = try allocator.dupeZ(u8, destination);
+    const dest_z = try allocator.dupeZ(u8, link.destination);
 
     // Use fstatat with SYMLINK_NOFOLLOW to detect symlinks
     const stat = std.posix.fstatat(std.posix.AT.FDCWD, dest_z, std.posix.AT.SYMLINK_NOFOLLOW) catch |err| {
@@ -38,17 +37,17 @@ pub fn checkLink(arena: *ArenaAllocator, link: config.Link) !LinkStatus {
 
     // Read the symlink target
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const target = std.fs.cwd().readLink(destination, &buf) catch {
+    const target = std.fs.cwd().readLink(link.destination, &buf) catch {
         return .broken;
     };
 
     // Check if source actually exists
-    std.fs.cwd().access(source, .{}) catch {
+    std.fs.cwd().access(link.source, .{}) catch {
         return .broken;
     };
 
     // Compare canonical paths to handle relative vs absolute differences
-    const source_real = std.fs.cwd().realpathAlloc(allocator, source) catch {
+    const source_real = std.fs.cwd().realpathAlloc(allocator, link.source) catch {
         return .broken;
     };
     const target_real = std.fs.cwd().realpathAlloc(allocator, target) catch {
@@ -63,13 +62,10 @@ pub fn checkLink(arena: *ArenaAllocator, link: config.Link) !LinkStatus {
 }
 
 /// Create a symlink
-pub fn createLink(arena: *ArenaAllocator, link: config.Link) !CreateResult {
-    const source = try config.expandPath(arena, link.source);
-    const destination = try config.expandPath(arena, link.destination);
-
+pub fn createLink(link: Link) !CreateResult {
     // Check if destination already exists
     const exists = blk: {
-        std.fs.cwd().access(destination, .{}) catch break :blk false;
+        std.fs.cwd().access(link.destination, .{}) catch break :blk false;
         break :blk true;
     };
 
@@ -78,10 +74,10 @@ pub fn createLink(arena: *ArenaAllocator, link: config.Link) !CreateResult {
             return .skipped;
         }
         // Remove existing file/symlink
-        std.fs.cwd().deleteFile(destination) catch |err| {
+        std.fs.cwd().deleteFile(link.destination) catch |err| {
             // Try removing as directory
             if (err == error.IsDir) {
-                std.fs.cwd().deleteDir(destination) catch return .failed;
+                std.fs.cwd().deleteDir(link.destination) catch return .failed;
             } else {
                 return .failed;
             }
@@ -89,17 +85,17 @@ pub fn createLink(arena: *ArenaAllocator, link: config.Link) !CreateResult {
     }
 
     // Ensure parent directory exists
-    if (std.fs.path.dirname(destination)) |parent| {
+    if (std.fs.path.dirname(link.destination)) |parent| {
         std.fs.cwd().makePath(parent) catch {};
     }
 
     // Create the symlink
-    std.fs.cwd().symLink(source, destination, .{}) catch {
+    std.fs.cwd().symLink(link.source, link.destination, .{}) catch {
         return .failed;
     };
 
     // Warn if source doesn't exist
-    std.fs.cwd().access(source, .{}) catch {
+    std.fs.cwd().access(link.source, .{}) catch {
         return .created_broken;
     };
 
@@ -109,10 +105,9 @@ pub fn createLink(arena: *ArenaAllocator, link: config.Link) !CreateResult {
 /// Get the current target of a symlink (for reporting)
 pub fn readLinkTarget(arena: *ArenaAllocator, path: []const u8) ![]const u8 {
     const allocator = arena.allocator();
-    const expanded = try config.expandPath(arena, path);
 
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const target = std.fs.cwd().readLink(expanded, &buf) catch |err| {
+    const target = std.fs.cwd().readLink(path, &buf) catch |err| {
         return err;
     };
 
@@ -143,16 +138,13 @@ test "createLink creates symlink" {
     var src = try dir.createFile("source.txt", .{});
     src.close();
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/source.txt",
         .destination = "test-tmp/" ++ name ++ "/dest.txt",
         .force = false,
     };
 
-    const result = try createLink(&arena, link);
+    const result = try createLink(link);
     try testing.expectEqual(.created, result);
 
     // Verify symlink exists and points to source
@@ -173,16 +165,13 @@ test "createLink skips existing destination" {
     var dst = try dir.createFile("dest.txt", .{});
     dst.close();
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/source.txt",
         .destination = "test-tmp/" ++ name ++ "/dest.txt",
         .force = false,
     };
 
-    const result = try createLink(&arena, link);
+    const result = try createLink(link);
     try testing.expectEqual(.skipped, result);
 }
 
@@ -198,16 +187,13 @@ test "createLink with force overwrites" {
     var dst = try dir.createFile("dest.txt", .{});
     dst.close();
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/source.txt",
         .destination = "test-tmp/" ++ name ++ "/dest.txt",
         .force = true,
     };
 
-    const result = try createLink(&arena, link);
+    const result = try createLink(link);
     try testing.expectEqual(.created, result);
 
     // Verify it's now a symlink using fstatat with SYMLINK_NOFOLLOW
@@ -228,10 +214,10 @@ test "checkLink returns ok for valid symlink" {
     // Create symlink
     try std.fs.cwd().symLink("test-tmp/" ++ name ++ "/source.txt", "test-tmp/" ++ name ++ "/dest.txt", .{});
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/source.txt",
         .destination = "test-tmp/" ++ name ++ "/dest.txt",
     };
@@ -246,10 +232,10 @@ test "checkLink returns missing when no symlink" {
     defer dir.close();
     defer cleanupTestDir(name);
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/source.txt",
         .destination = "test-tmp/" ++ name ++ "/nonexistent.txt",
     };
@@ -267,10 +253,10 @@ test "checkLink returns broken when source missing" {
     // Create symlink to non-existent source
     try std.fs.cwd().symLink("test-tmp/" ++ name ++ "/missing.txt", "test-tmp/" ++ name ++ "/dest.txt", .{});
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/missing.txt",
         .destination = "test-tmp/" ++ name ++ "/dest.txt",
     };
@@ -289,10 +275,10 @@ test "checkLink returns not_a_symlink for regular file" {
     var dst = try dir.createFile("dest.txt", .{});
     dst.close();
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/source.txt",
         .destination = "test-tmp/" ++ name ++ "/dest.txt",
     };
@@ -316,10 +302,10 @@ test "checkLink returns wrong_target for mismatched symlink" {
     // Create symlink pointing to source2
     try std.fs.cwd().symLink("test-tmp/" ++ name ++ "/source2.txt", "test-tmp/" ++ name ++ "/dest.txt", .{});
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const link = config.Link{
+    const link = Link{
         .source = "test-tmp/" ++ name ++ "/source1.txt", // expecting source1
         .destination = "test-tmp/" ++ name ++ "/dest.txt",
     };

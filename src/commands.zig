@@ -43,6 +43,11 @@ const Status = enum {
     }
 };
 
+pub const CommandError = error{
+    LinksFailed,
+    LinksUnhealthy,
+};
+
 /// Run the link command - create all symlinks from config
 pub fn runLink(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !void {
     var created_count: u32 = 0;
@@ -73,6 +78,7 @@ pub fn runLink(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !voi
     }
 
     try writer.print("\n{d} created, {d} skipped, {d} failed\n", .{ created_count, skipped_count, failed_count });
+    if (failed_count > 0) return CommandError.LinksFailed;
 }
 
 /// Run the doctor command - check health of all links
@@ -115,4 +121,5 @@ pub fn runDoctor(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !v
     }
 
     try writer.print("\n{d} ok, {d} broken, {d} missing, {d} wrong, {d} conflict\n", .{ ok_count, broken_count, missing_count, wrong_count, conflict_count });
+    if (ok_count != cfg.links.len) return CommandError.LinksUnhealthy;
 }

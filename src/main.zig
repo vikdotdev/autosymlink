@@ -118,11 +118,19 @@ pub fn main() !void {
     defer cfg.deinit();
 
     // Execute command
-    switch (command.?) {
-        .link => try commands.runLink(&arena, cfg.value, stdout),
-        .doctor => try commands.runDoctor(&arena, cfg.value, stdout),
+    const result = switch (command.?) {
+        .link => commands.runLink(&arena, cfg.value, stdout),
+        .doctor => commands.runDoctor(&arena, cfg.value, stdout),
         .help, .version => unreachable,
-    }
+    };
+
+    result catch |err| switch (err) {
+        error.LinksFailed, error.LinksUnhealthy => {
+            stdout.flush() catch {};
+            std.process.exit(1);
+        },
+        else => return err,
+    };
 }
 
 fn printUsage(writer: anytype) !void {

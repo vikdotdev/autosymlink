@@ -66,6 +66,10 @@ pub fn runLink(arena: *ArenaAllocator, cfg: config.Config, writer: *Writer) !voi
                 try Status.ok.print(writer, "{s} -> {s}", .{ link.source, link.destination });
                 created_count += 1;
             },
+            .created_broken => {
+                try Status.broken.print(writer, "{s} -> {s} (source does not exist)", .{ link.source, link.destination });
+                created_count += 1;
+            },
             .skipped => {
                 try Status.skip.print(writer, "{s} -> {s} (destination exists, use force: true)", .{ link.source, link.destination });
                 skipped_count += 1;

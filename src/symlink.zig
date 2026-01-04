@@ -13,6 +13,7 @@ pub const LinkStatus = enum {
 
 pub const CreateResult = enum {
     created,
+    created_broken, // created but source doesn't exist
     skipped, // destination exists and force=false
     failed,
 };
@@ -41,15 +42,22 @@ pub fn checkLink(arena: *ArenaAllocator, link: config.Link) !LinkStatus {
         return .broken;
     };
 
-    // Check if target matches expected source
-    if (!std.mem.eql(u8, target, source)) {
-        return .wrong_target;
-    }
-
     // Check if source actually exists
     std.fs.cwd().access(source, .{}) catch {
         return .broken;
     };
+
+    // Compare canonical paths to handle relative vs absolute differences
+    const source_real = std.fs.cwd().realpathAlloc(allocator, source) catch {
+        return .broken;
+    };
+    const target_real = std.fs.cwd().realpathAlloc(allocator, target) catch {
+        return .broken;
+    };
+
+    if (!std.mem.eql(u8, target_real, source_real)) {
+        return .wrong_target;
+    }
 
     return .ok;
 }
@@ -88,6 +96,11 @@ pub fn createLink(arena: *ArenaAllocator, link: config.Link) !CreateResult {
     // Create the symlink
     std.fs.cwd().symLink(source, destination, .{}) catch {
         return .failed;
+    };
+
+    // Warn if source doesn't exist
+    std.fs.cwd().access(source, .{}) catch {
+        return .created_broken;
     };
 
     return .created;

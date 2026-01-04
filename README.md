@@ -1,13 +1,15 @@
-# autosymlink
+# `autosymlink` - zero-dependencies simple symlink manager
 
-Symlink manager based on a JSON config file.
+If you're managing dotfiles or need to maintain symlinks across machines, this tool lets you define them declaratively in a JSON config and sync them with a single command.
 
 ## Installation
 
-### Quick install (Linux x86_64)
+### Quickstart (Linux x86_64)
 
 ```bash
+mkdir -p ~/.local/bin ~/.config/autosymlink
 curl -sL $(curl -s https://api.github.com/repos/vikdotdev/autosymlink/releases/latest | grep -o 'https://.*x86_64-linux-musl') -o ~/.local/bin/autosymlink && chmod +x ~/.local/bin/autosymlink
+echo '{"links": []}' > ~/.config/autosymlink/config.json
 ```
 
 ### Manual download
